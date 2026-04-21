@@ -217,7 +217,7 @@ app.get("/resultados", (req, res) => {
     LIMIT ? OFFSET ?
   `;
 
-  db.all(query, [limit, offset], (err, rows) => {
+  db.all(query, [limit + 1, offset], (err, rows) => {
     if (err) {
       console.error(err);
       return res.status(500).json({
@@ -225,7 +225,16 @@ app.get("/resultados", (req, res) => {
       });
     }
 
-    res.json(rows);
+    // 🔥 DETECTAR SI HAY MÁS
+    const hayMas = rows.length > limit;
+
+    // devolver solo 5
+    const resultados = rows.slice(0, limit);
+
+    res.json({
+      resultados,
+      hayMas,
+    });
   });
 });
 
