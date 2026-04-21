@@ -1,6 +1,8 @@
-node_modules/
+node_modules
 .env*
 .env
 database.db
 *.log
 dist/
+node_modules
+backend/.env

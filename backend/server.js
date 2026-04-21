@@ -17,7 +17,7 @@ require("./database");
 
 // 🤖 Cliente OpenAI
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // ⚙️ CONFIG (según tu .md)
@@ -38,7 +38,7 @@ function limpiarJSON(text) {
 }
 
 function normalizarPreguntas(preguntas) {
-  return preguntas.map(p => {
+  return preguntas.map((p) => {
     if (p.tipo === "multiple") {
       if (["A", "B", "C", "D"].includes(p.correcta)) {
         const index = ["A", "B", "C", "D"].indexOf(p.correcta);
@@ -46,9 +46,11 @@ function normalizarPreguntas(preguntas) {
       }
 
       // limpiar opciones tipo "A) texto"
-      p.opciones = p.opciones.map(op =>
-        op.replace(/^[A-D]\)\s*/, "").trim()
-      );
+      p.opciones = p.opciones.map((op) => op.replace(/^[A-D]\)\s*/, "").trim());
+    }
+
+    if (typeof p.explicacion !== "string") {
+      p.explicacion = JSON.stringify(p.explicacion);
     }
 
     return p;
@@ -70,7 +72,7 @@ app.post("/generar", async (req, res) => {
 
   if (!temas || typeof temas !== "string") {
     return res.status(400).json({
-      error: "Debes enviar el campo 'temas' como texto"
+      error: "Debes enviar el campo 'temas' como texto",
     });
   }
 
@@ -118,9 +120,9 @@ Formato:
     "explicacion": "..."
   }
 ]
-`
-          }
-        ]
+`,
+          },
+        ],
       });
 
       let text = completion.choices[0].message.content;
@@ -142,20 +144,19 @@ Formato:
 
       console.log("✅ JSON válido obtenido");
       break;
-
     } catch (error) {
       console.error(`❌ Error en intento ${intento}:`, error.message);
 
       if (intento === MAX_REINTENTOS) {
         return res.status(500).json({
-          error: "No se pudo generar preguntas válidas tras varios intentos"
+          error: "No se pudo generar preguntas válidas tras varios intentos",
         });
       }
     }
   }
 
   res.json({
-    preguntas
+    preguntas,
   });
 });
 
@@ -163,18 +164,11 @@ Formato:
 const db = require("./database");
 
 app.post("/guardar", (req, res) => {
-  const {
-    temas,
-    preguntas,
-    respuestas,
-    correctas,
-    total,
-    nota
-  } = req.body;
+  const { temas, preguntas, respuestas, correctas, total, nota } = req.body;
 
   if (!temas || !respuestas) {
     return res.status(400).json({
-      error: "Datos incompletos"
+      error: "Datos incompletos",
     });
   }
 
@@ -192,7 +186,7 @@ app.post("/guardar", (req, res) => {
       JSON.stringify(respuestas),
       correctas,
       total,
-      nota
+      nota,
     ],
     function (err) {
       if (err) {
@@ -202,10 +196,37 @@ app.post("/guardar", (req, res) => {
 
       res.json({
         message: "Resultado guardado",
-        id: this.lastID
+        id: this.lastID,
+      });
+    },
+  );
+});
+
+// Obtener historial
+// Obtener historial paginado
+app.get("/resultados", (req, res) => {
+  const db = require("./database");
+
+  const page = parseInt(req.query.page) || 1;
+  const limit = 5;
+  const offset = (page - 1) * limit;
+
+  const query = `
+    SELECT * FROM resultados
+    ORDER BY fecha DESC
+    LIMIT ? OFFSET ?
+  `;
+
+  db.all(query, [limit, offset], (err, rows) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({
+        error: "Error obteniendo resultados",
       });
     }
-  );
+
+    res.json(rows);
+  });
 });
 
 // ------------------- SERVER -------------------
