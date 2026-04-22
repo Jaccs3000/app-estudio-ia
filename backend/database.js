@@ -1,6 +1,8 @@
-const sqlite3 = require("sqlite3").verbose();
+import sqlite3 from "sqlite3";
+const sqlite = sqlite3.verbose();
 
-const db = new sqlite3.Database("./database.db");
+const db = new sqlite.Database("./database.db");
+export default db;
 
 // Crear tabla si no existe
 db.serialize(() => {
@@ -18,4 +20,3 @@ db.serialize(() => {
   `);
 });
 
-module.exports = db;

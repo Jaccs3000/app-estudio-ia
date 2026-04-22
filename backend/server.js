@@ -1,19 +1,19 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import OpenAI from "openai";
+import db from "./database.js";
+
+dotenv.config();
+
 console.log("🔥 server.js cargado");
 
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-
-// 🧠 OpenAI oficial
-const OpenAI = require("openai");
+const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-
-// 🔗 Inicializar base de datos
-require("./database");
 
 // 🤖 Cliente OpenAI
 const client = new OpenAI({
@@ -81,9 +81,10 @@ app.post("/generar", async (req, res) => {
   for (let intento = 1; intento <= MAX_REINTENTOS; intento++) {
     try {
       console.log(`🔁 Intento ${intento}`);
+      console.log("Usando modelo:", MODEL);
 
       const completion = await client.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: MODEL, //"gpt-4o-mini",
         messages: [
           {
             role: "user",
@@ -160,9 +161,6 @@ Formato:
   });
 });
 
-// Guardar en BD
-const db = require("./database");
-
 app.post("/guardar", (req, res) => {
   const { temas, preguntas, respuestas, correctas, total, nota } = req.body;
 
@@ -205,7 +203,6 @@ app.post("/guardar", (req, res) => {
 // Obtener historial
 // Obtener historial paginado
 app.get("/resultados", (req, res) => {
-  const db = require("./database");
 
   const page = parseInt(req.query.page) || 1;
   const limit = 5;
@@ -235,6 +232,71 @@ app.get("/resultados", (req, res) => {
       resultados,
       hayMas,
     });
+  });
+});
+
+// ------------------- ESTADISTICAS -------------------
+app.get("/estadisticas", (req, res) => {
+
+  const query = `
+    SELECT 
+      COUNT(*) as total_intentos,
+      AVG(nota) as promedio,
+      MAX(nota) as mejor,
+      MIN(nota) as peor
+    FROM resultados
+  `;
+
+  db.get(query, [], (err, stats) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({
+        error: "Error obteniendo estadísticas",
+      });
+    }
+
+    // 🔥 obtener último intento
+    db.get(
+      `SELECT nota, fecha FROM resultados ORDER BY fecha DESC LIMIT 1`,
+      [],
+      (err2, ultimo) => {
+        if (err2) {
+          console.error(err2);
+          return res.status(500).json({
+            error: "Error obteniendo último intento",
+          });
+        }
+
+        res.json({
+          ...stats,
+          ultimo_intento: ultimo,
+        });
+      },
+    );
+  });
+});
+
+// ------------------ DASHBOARD -------------------
+app.get("/dashboard", (req, res) => {
+
+  const limit = parseInt(req.query.limit) || 10;
+
+  const query = `
+    SELECT id, temas, nota, fecha, respuestas
+    FROM resultados
+    ORDER BY fecha DESC
+    LIMIT ?
+  `;
+
+  db.all(query, [limit], (err, rows) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({
+        error: "Error obteniendo dashboard",
+      });
+    }
+
+    res.json(rows);
   });
 });
 
