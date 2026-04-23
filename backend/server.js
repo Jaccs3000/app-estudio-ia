@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import multer from "multer";
+import mammoth from "mammoth";
 import db from "./database.js";
 
 dotenv.config();
@@ -11,6 +13,7 @@ console.log("🔥 server.js cargado");
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
 const app = express();
+const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
 app.use(express.json());
@@ -89,39 +92,34 @@ app.post("/generar", async (req, res) => {
           {
             role: "user",
             content: `
-Genera preguntas educativas en español para estudiantes sobre:
+Genera preguntas educativas en español EXCLUSIVAMENTE basadas en el siguiente contenido:
+
 ${temas}
 
-Reglas:
+REGLAS ESTRICTAS (OBLIGATORIAS):
+- SOLO puedes usar información que esté explícitamente en el texto
+- NO uses conocimiento externo bajo ninguna circunstancia
+- NO completes información faltante
+- NO hagas inferencias
+- NO reformules usando conocimiento previo
+- Si un dato no está en el texto, NO lo uses
+
+VALIDACIÓN:
+- Cada pregunta debe poder responderse directamente con el contenido
+- Si no hay suficiente información, genera preguntas más simples
+
+FORMATO:
 - Exactamente 5 preguntas
 - Mezclar:
   - selección múltiple (4 opciones, una correcta)
   - verdadero/falso
-- Incluir explicación breve en TODAS las preguntas
+- Incluir explicación breve en TODAS
 - NO repetir preguntas
 - NO repetir opciones
 - Nivel: primaria/secundaria
 
 IMPORTANTE:
-Devuelve SOLO JSON válido, sin texto adicional.
-
-Formato:
-[
-  {
-    "tipo": "multiple",
-    "pregunta": "...",
-    "opciones": ["A","B","C","D"],
-    "correcta": "A",
-    "explicacion": "..."
-  },
-  {
-    "tipo": "vf",
-    "pregunta": "...",
-    "respuesta_correcta": true,
-    "explicacion": "..."
-  }
-]
-`,
+Devuelve SOLO JSON válido, sin texto adicional.`,
           },
         ],
       });
@@ -203,7 +201,6 @@ app.post("/guardar", (req, res) => {
 // Obtener historial
 // Obtener historial paginado
 app.get("/resultados", (req, res) => {
-
   const page = parseInt(req.query.page) || 1;
   const limit = 5;
   const offset = (page - 1) * limit;
@@ -237,7 +234,6 @@ app.get("/resultados", (req, res) => {
 
 // ------------------- ESTADISTICAS -------------------
 app.get("/estadisticas", (req, res) => {
-
   const query = `
     SELECT 
       COUNT(*) as total_intentos,
@@ -278,7 +274,6 @@ app.get("/estadisticas", (req, res) => {
 
 // ------------------ DASHBOARD -------------------
 app.get("/dashboard", (req, res) => {
-
   const limit = parseInt(req.query.limit) || 10;
 
   const query = `
@@ -303,6 +298,69 @@ app.get("/dashboard", (req, res) => {
 // ------------------- SERVER -------------------
 
 const PORT = process.env.PORT || 3000;
+
+app.post("/procesar-archivos", upload.array("archivos"), async (req, res) => {
+  try {
+    const archivos = req.files;
+
+    if (!archivos || archivos.length === 0) {
+      return res.status(400).json({ error: "No se enviaron archivos" });
+    }
+
+    let textoTotal = "";
+
+    for (const file of archivos) {
+      const nombre = file.originalname.toLowerCase();
+
+      // TXT
+      if (nombre.endsWith(".txt")) {
+        textoTotal += file.buffer.toString("utf-8") + "\n\n";
+      }
+
+      // PDF
+      else if (nombre.endsWith(".pdf")) {
+        textoTotal += "[Archivo PDF no soportado en esta versión]\n\n";
+      }
+
+      // DOCX
+      else if (nombre.endsWith(".docx")) {
+        const result = await mammoth.extractRawText({
+          buffer: file.buffer,
+        });
+        textoTotal += result.value + "\n\n";
+      }
+
+      // DOC (limitado)
+      else if (nombre.endsWith(".doc")) {
+        textoTotal += "[Archivo .doc no soportado completamente]\n\n";
+      }
+    }
+
+    // 🔥 RESUMEN IA
+    const prompt = `
+Resume el siguiente contenido en UNA sola frase corta (máximo 20 palabras).
+La frase debe comenzar SIEMPRE con: "Los documentos cargados tratan sobre..."
+No des detalles, solo una idea general del tema.
+
+${textoTotal.substring(0, 4000)}
+`;
+
+    const completion = await client.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    const resumen = completion.choices[0].message.content;
+
+    res.json({
+      texto: textoTotal,
+      resumen,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Error procesando archivos" });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Servidor corriendo en http://localhost:${PORT}`);
