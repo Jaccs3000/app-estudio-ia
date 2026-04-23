@@ -1,4 +1,19 @@
+import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { useState, useEffect } from "react";
+import { Cell } from "recharts";
+import { ResponsiveContainer } from "recharts";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
+const Layout = ({ children }) => (
+  <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-200 flex justify-center px-4 py-6">
+    <div className="w-full max-w-3xl bg-white rounded-2xl shadow-lg p-6 md:p-8">
+      <h1 className="text-xl md:text-2xl font-bold text-gray-800 mb-6 text-center">
+        📚 App de Estudio con IA
+      </h1>
+      {children}
+    </div>
+  </div>
+);
 
 function App() {
   const [temas, setTemas] = useState("");
@@ -6,6 +21,10 @@ function App() {
   const [guardado, setGuardado] = useState(false);
   const [pagina, setPagina] = useState(1);
   const [detalle, setDetalle] = useState(null);
+  const [hayMas, setHayMas] = useState(false);
+  const [dataGrafico, setDataGrafico] = useState([]);
+  const [verDashboard, setVerDashboard] = useState(false);
+  const LIMITE_GRAFICO = 10;
 
   const [preguntas, setPreguntas] = useState([]);
   const [historial, setHistorial] = useState([]);
@@ -16,8 +35,24 @@ function App() {
   const [respuestas, setRespuestas] = useState([]);
 
   const [mostrarFeedback, setMostrarFeedback] = useState(false);
+  const [seleccionActual, setSeleccionActual] = useState(null);
   const [finalizado, setFinalizado] = useState(false);
   const [modoRefuerzo, setModoRefuerzo] = useState(false);
+
+  const btnPrimary =
+    "bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2 rounded-xl transition";
+  const btnSecondary =
+    "bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-xl transition";
+  const btnSuccess =
+    "bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl transition";
+
+  const getColor = (nota) => {
+    const n = Number(nota);
+
+    if (n >= 4) return "#4caf50"; // verde
+    if (n >= 3) return "#ff9800"; // amarillo/naranja
+    return "#f44336"; // rojo
+  };
 
   // ------------------- GENERAR -------------------
 
@@ -81,7 +116,7 @@ function App() {
       explicacion: pregunta.explicacion,
       correcta: pregunta.correcta || pregunta.respuesta_correcta,
     };
-
+    setSeleccionActual(valor);
     setRespuestas((prev) => [...prev, nueva]);
     setMostrarFeedback(true);
   };
@@ -89,6 +124,7 @@ function App() {
   // ------------------- SIGUIENTE -------------------
 
   const siguiente = () => {
+    setSeleccionActual(null);
     setMostrarFeedback(false);
 
     if (indiceActual + 1 < preguntas.length) {
@@ -131,19 +167,30 @@ function App() {
     setModoRefuerzo(false);
     setGuardado(false);
     setVerHistorial(false);
+    setVerDashboard(false);
     //setTemas("");
   };
 
   const obtenerHistorial = async (page = 1) => {
-    if (typeof page !== "number") {
-      page = 1;
-    }
     try {
+      if (typeof page !== "number") {
+        page = 1;
+      }
+
       const res = await fetch(`http://localhost:3000/resultados?page=${page}`);
       const data = await res.json();
 
-      setHistorial(data);
+      // 🔥 SI NO HAY DATOS Y NO ES LA PRIMERA PÁGINA → NO AVANZAR
+      if (data.resultados.length === 0 && page > 1) {
+        return;
+      }
+
+      setHistorial(data.resultados);
       setPagina(page);
+
+      // 🔥 SOLO HAY MÁS SI VIENEN EXACTAMENTE 5
+      setHayMas(data.hayMas);
+
       setVerHistorial(true);
     } catch (error) {
       console.error(error);
@@ -179,6 +226,28 @@ function App() {
     }
   };
 
+  const obtenerDashboard = async () => {
+    try {
+      const res = await fetch(
+        `http://localhost:3000/dashboard?limit=${LIMITE_GRAFICO}`,
+      );
+      const data = await res.json();
+
+      // 🔥 FORMATEAR FECHA CORTA
+      const formateado = data.map((item, index) => ({
+        ...item,
+        fechaCorta: new Date(item.fecha).toLocaleString(),
+        index,
+      }));
+
+      setDataGrafico(formateado);
+      setVerDashboard(true);
+    } catch (error) {
+      console.error(error);
+      alert("Error cargando dashboard");
+    }
+  };
+
   useEffect(() => {
     if (finalizado && !guardado) {
       guardarResultado();
@@ -191,61 +260,152 @@ function App() {
       return (
         <div style={{ padding: "20px" }}>
           <p>Error en datos del historial</p>
-          <button onClick={() => setDetalle(null)}>Volver</button>
+          <button
+            onClick={() => setDetalle(null)}
+            className={`${btnPrimary} w-full md:w-auto`}
+          >
+            Volver
+          </button>
         </div>
       );
     }
 
     return (
-      <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
-        <h2>Detalle del intento 📘</h2>
+      <Layout>
+        <h2 className="text-xl font-semibold text-gray-800 mb-4">
+          Detalle del intento 📘
+        </h2>
 
         {detalle.respuestas.map((r, i) => (
-          <div key={i} style={{ marginBottom: "15px" }}>
-            <p>
-              <strong>{r.pregunta}</strong>
-            </p>
+          <div
+            key={i}
+            className="bg-white border-l-4 border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:shadow-lg hover:-translate-y-1 transition duration-200 cursor-pointer"
+          >
+            <p className="font-semibold text-gray-800 mb-1">{r.pregunta}</p>
 
-            <p>
+            <p className="text-sm text-gray-600">
               Tu respuesta:{" "}
               {typeof r.seleccion === "object"
                 ? JSON.stringify(r.seleccion)
                 : String(r.seleccion)}
             </p>
 
-            <p>
+            <p className="text-sm text-gray-600">
               Correcta:{" "}
               {typeof r.correcta === "object"
                 ? JSON.stringify(r.correcta)
                 : String(r.correcta)}
             </p>
 
-            <p style={{ color: r.esCorrecta ? "green" : "red" }}>
+            <p
+              className={
+                r.esCorrecta
+                  ? "text-green-600 font-semibold"
+                  : "text-red-600 font-semibold"
+              }
+            >
               {r.esCorrecta ? "Correcto" : "Incorrecto"}
             </p>
 
             {!r.esCorrecta && (
-              <p>
+              <div>
                 <p>
                   <strong>Explicación:</strong>{" "}
                   {typeof r.explicacion === "object"
                     ? JSON.stringify(r.explicacion)
                     : String(r.explicacion)}
                 </p>
-              </p>
+              </div>
             )}
           </div>
         ))}
 
-        <button onClick={() => setDetalle(null)}>Volver</button>
-      </div>
+        <button
+          onClick={() => setDetalle(null)}
+          className={`${btnPrimary} w-full md:w-auto`}
+        >
+          Volver
+        </button>
+      </Layout>
+    );
+  }
+
+  if (verDashboard) {
+    return (
+      <Layout>
+        <h2 className="text-center text-xl font-semibold mb-6">
+          Rendimiento por intento 📊
+        </h2>
+
+        <ResponsiveContainer width="100%" height={350}>
+          <BarChart data={dataGrafico}>
+            <CartesianGrid stroke="#eee" strokeDasharray="2 2" />
+
+            <XAxis dataKey="fechaCorta" tick={{ fontSize: 10 }} />
+
+            <YAxis domain={[0, 5]} tick={{ fontSize: 12 }} />
+
+            <Tooltip
+              content={({ active, payload }) => {
+                if (active && payload && payload.length > 0) {
+                  const data = payload[0].payload;
+
+                  return (
+                    <div className="bg-gray-900 text-white p-3 rounded-lg shadow-lg text-sm">
+                      <p>
+                        <strong>{data.temas}</strong>
+                      </p>
+                      <p>Nota: {data.nota}/5</p>
+                      <p className="text-xs text-gray-300">{data.fechaCorta}</p>
+                    </div>
+                  );
+                }
+                return null;
+              }}
+            />
+
+            <Bar
+              dataKey="nota"
+              animationDuration={800}
+              radius={[6, 6, 0, 0]}
+              onClick={(data) => {
+                let respuestas = [];
+
+                try {
+                  respuestas = JSON.parse(data.payload.respuestas);
+                } catch (e) {
+                  console.error("Error parseando respuestas", e);
+                }
+
+                setDetalle({
+                  ...data.payload,
+                  respuestas,
+                });
+              }}
+            >
+              {dataGrafico.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={getColor(entry.nota)} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+
+        <button
+          onClick={reiniciarTodo}
+          className={`${btnPrimary} w-full md:w-auto`}
+        >
+          Volver
+        </button>
+      </Layout>
     );
   }
 
   if (verHistorial) {
     return (
-      <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
-        <h2>Historial 📊</h2>
+      <Layout>
+        <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
+          📊 Historial
+        </h2>
 
         {historial.filter(Boolean).length === 0 ? (
           <p>No hay registros</p>
@@ -270,49 +430,73 @@ function App() {
                     respuestas,
                   })
                 }
+                className="bg-white rounded-xl p-4 mb-4 shadow-md hover:shadow-xl hover:-translate-y-1 transition duration-200 cursor-pointer"
                 style={{
-                  border: "1px solid #ccc",
-                  padding: "10px",
-                  marginBottom: "10px",
-                  borderRadius: "5px",
-                  cursor: "pointer",
+                  borderLeft: `6px solid ${getColor(item.nota)}`,
                 }}
               >
-                <p>
-                  <strong>Temas:</strong> {item.temas}
-                </p>
-                <p>
-                  <strong>Nota:</strong> {item.nota}
-                </p>
-                <p>
-                  <strong>Resultado:</strong> {item.correctas}/{item.total}
-                </p>
-                <p>
-                  <strong>Fecha:</strong> {item.fecha}
-                </p>
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="font-medium text-gray-800">{item.temas}</p>
+
+                    <p className="text-sm text-gray-600">
+                      Resultado: {item.correctas}/{item.total}
+                    </p>
+
+                    <p className="text-xs text-gray-400 mt-1">{item.fecha}</p>
+                  </div>
+
+                  <div className="text-right flex flex-col items-end justify-center min-w-[50px]">
+                    <p
+                      className="font-bold text-lg"
+                      style={{ color: getColor(item.nota) }}
+                    >
+                      {item.nota}
+                    </p>
+                    <p className="text-xs text-gray-400">Nota</p>
+                  </div>
+                </div>
               </div>
             );
           })
         )}
 
         {/* 🔥 PAGINACIÓN AQUÍ */}
-        <div style={{ marginTop: "20px" }}>
+        <div className="mt-6 flex justify-start">
           <button
-            onClick={() => obtenerHistorial(pagina - 1)}
-            disabled={pagina === 1}
+            onClick={() => {
+              setVerHistorial(false);
+              setVerDashboard(false);
+              setDetalle(null);
+            }}
+            className={`${btnPrimary} px-3 py-1.5 text-sm`}
           >
-            ⬅ Anterior
-          </button>
-
-          <span style={{ margin: "0 10px" }}>Página {pagina}</span>
-
-          <button onClick={() => obtenerHistorial(pagina + 1)}>
-            Siguiente ➡
+            ← Volver
           </button>
         </div>
 
-        <button onClick={reiniciarTodo}>Volver</button>
-      </div>
+        <div className="mt-6 flex justify-center">
+          <div className="flex items-center gap-4 bg-gray-50 px-4 py-2 rounded-xl shadow-sm">
+            <button
+              onClick={() => obtenerHistorial(pagina - 1)}
+              className={`${btnPrimary} w-12 h-12 flex items-center justify-center rounded-full shadow-md hover:scale-110`}
+              disabled={pagina === 1}
+            >
+              <ChevronLeft size={26} color="white" />
+            </button>
+
+            <span className="text-sm text-gray-600">Página {pagina}</span>
+
+            <button
+              onClick={() => obtenerHistorial(pagina + 1)}
+              className={`${btnPrimary} w-12 h-12 flex items-center justify-center rounded-full shadow-md hover:scale-110`}
+              disabled={!hayMas}
+            >
+              <ChevronRight size={26} color="white" />
+            </button>
+          </div>
+        </div>
+      </Layout>
     );
   }
 
@@ -324,31 +508,51 @@ function App() {
     const nota = ((correctas / total) * 5).toFixed(2);
 
     return (
-      <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
-        <h2>Resultado final</h2>
+      <Layout>
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4">
+          <h2 className="text-lg font-semibold text-indigo-700 mb-2">
+            Resultado final
+          </h2>
 
-        <p>Correctas: {correctas}</p>
-        <p>Total: {total}</p>
-        <p>
-          <strong>Nota: {nota}</strong>
-        </p>
+          <p className="text-gray-700">
+            Correctas: <span className="font-semibold">{correctas}</span>
+          </p>
+
+          <p className="text-gray-700">
+            Total: <span className="font-semibold">{total}</span>
+          </p>
+
+          <p className="text-xl font-bold text-indigo-600 mt-2">Nota: {nota}</p>
+        </div>
 
         <hr />
 
         {respuestas.map((r, i) => (
-          <div key={i} style={{ marginBottom: "15px" }}>
+          <div
+            key={i}
+            className="bg-white border-l-4 border-gray-200 rounded-xl p-4 mb-3 shadow-sm hover:shadow-lg hover:-translate-y-1 transition duration-200 cursor-pointer"
+          >
             <p>
               <strong>{r.pregunta}</strong>
             </p>
             <p>Tu respuesta: {String(r.seleccion)}</p>
 
-            <p style={{ color: r.esCorrecta ? "green" : "red" }}>
+            <p
+              className={
+                r.esCorrecta
+                  ? "text-green-600 font-semibold"
+                  : "text-red-600 font-semibold"
+              }
+            >
               {r.esCorrecta ? "Correcto" : "Incorrecto"}
             </p>
 
             {!r.esCorrecta && (
               <p>
-                <strong>Explicación:</strong> {r.explicacion}
+                <strong>Explicación:</strong>{" "}
+                {typeof r.explicacion === "object"
+                  ? JSON.stringify(r.explicacion)
+                  : String(r.explicacion)}
               </p>
             )}
           </div>
@@ -356,17 +560,20 @@ function App() {
 
         {/* BOTÓN REFUERZO */}
         {!modoRefuerzo && (
-          <button onClick={iniciarRefuerzo} style={{ marginTop: "20px" }}>
+          <button
+            onClick={iniciarRefuerzo}
+            className={`${btnPrimary} w-full md:w-auto`}
+          >
             Reforzar preguntas incorrectas
           </button>
         )}
         <button
           onClick={reiniciarTodo}
-          style={{ marginTop: "10px", marginLeft: "10px" }}
+          className={`${btnPrimary} w-full md:w-auto`}
         >
           Nuevo cuestionario 🔄
         </button>
-      </div>
+      </Layout>
     );
   }
 
@@ -385,62 +592,71 @@ function App() {
   }
 
   return (
-    <div style={{ padding: "20px", maxWidth: "800px", margin: "auto" }}>
-      <h1>App de Estudio con IA 📚</h1>
-
-      {/* INPUT */}
+    <Layout>
+      {/* <h1 className="text-2xl md:text-3xl font-bold text-gray-800 mb-6 text-center">📚 App de Estudio con IA</h1> */}
       {preguntas.length === 0 && !verHistorial && (
         <>
-          <textarea
-            placeholder="Escribe los temas (ej: fotosíntesis, células)"
-            value={temas}
-            onChange={(e) => setTemas(e.target.value)}
-            style={{ width: "100%", height: "100px", marginBottom: "10px" }}
-          />
+          <div className="space-y-4">
+            <textarea
+              placeholder="Escribe los temas (ej: fotosíntesis, células)"
+              value={temas}
+              onChange={(e) => setTemas(e.target.value)}
+              className="w-full h-28 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
+            />
 
-          <button onClick={generarPreguntas} disabled={cargando}>
-            {cargando ? "Generando..." : "Generar preguntas"}
-          </button>
+            <div className="flex flex-col md:flex-row gap-2">
+              <button
+                onClick={generarPreguntas}
+                disabled={cargando}
+                className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2 rounded-xl w-full"
+              >
+                {cargando ? "Generando..." : "Generar preguntas"}
+              </button>
 
-          <button onClick={() => obtenerHistorial(1)}>Ver historial 📊</button>
+              <button
+                onClick={() => obtenerHistorial(1)}
+                className={`${btnSecondary} w-full`}
+              >
+                Historial
+              </button>
+
+              <button
+                onClick={obtenerDashboard}
+                className={`${btnSecondary} w-full`}
+              >
+                Dashboard
+              </button>
+            </div>
+          </div>
         </>
       )}
 
       {/* MODO REFUERZO */}
       {modoRefuerzo && (
-        <p style={{ color: "orange" }}>🔁 Modo Refuerzo (no afecta nota)</p>
+        <p className="text-orange-500 font-medium">
+          🔁 Modo Refuerzo (no afecta nota)
+        </p>
       )}
 
       {/* PREGUNTAS */}
       {preguntas.length > 0 && !finalizado && p && (
-        <div>
+        <div className="transition-all duration-300 animate-fadeIn">
           {/* PROGRESO */}
-          <p>
-            <strong>
-              Pregunta {actual} de {total}
-            </strong>
+          <p className="text-sm text-gray-500 mb-1">
+            Pregunta {actual} de {total}
           </p>
 
           {/* BARRA */}
-          <div
-            style={{
-              background: "#ddd",
-              height: "10px",
-              borderRadius: "5px",
-              marginBottom: "15px",
-            }}
-          >
+          <div className="w-full h-2 bg-gray-200 rounded-full mb-3 overflow-hidden">
             <div
-              style={{
-                width: `${(actual / total) * 100}%`,
-                background: "#4caf50",
-                height: "100%",
-                borderRadius: "5px",
-              }}
+              className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-300"
+              style={{ width: `${(actual / total) * 100}%` }}
             />
           </div>
 
-          <h2>{p.pregunta}</h2>
+          <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-4">
+            {p.pregunta}
+          </h2>
 
           {/* OPCIONES */}
           {!mostrarFeedback && (
@@ -450,8 +666,14 @@ function App() {
                   {p.opciones.map((op, i) => (
                     <button
                       key={i}
-                      onClick={() => responder(op)}
-                      style={{ display: "block", marginBottom: "10px" }}
+                      onClick={() => {
+                        if (!mostrarFeedback) responder(op);
+                      }}
+                      className={`w-full text-left px-4 py-3 rounded-xl transition mb-2 active:scale-95 ${
+                        seleccionActual === op
+                          ? "bg-indigo-500 text-white"
+                          : "bg-gray-100 hover:bg-indigo-100"
+                      }`}
                     >
                       {op}
                     </button>
@@ -460,11 +682,20 @@ function App() {
               )}
 
               {p.tipo === "vf" && (
-                <div>
-                  <button onClick={() => responder(true)}>Verdadero</button>
+                <div className="flex gap-3 mt-2">
                   <button
-                    onClick={() => responder(false)}
-                    style={{ marginLeft: "10px" }}
+                    onClick={() => {
+                      if (!mostrarFeedback) responder(true);
+                    }}
+                    className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl transition w-full md:w-auto"
+                  >
+                    Verdadero
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (!mostrarFeedback) responder(false);
+                    }}
+                    className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl transition w-full md:w-auto"
                   >
                     Falso
                   </button>
@@ -475,13 +706,17 @@ function App() {
 
           {/* FEEDBACK */}
           {mostrarFeedback && (
-            <div style={{ marginTop: "20px" }}>
+            <div className="mt-6 space-y-4">
               {respuestas[indiceActual]?.esCorrecta ? (
-                <p style={{ color: "green" }}>✅ Correcto</p>
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <p className="text-green-700 font-semibold">✅ Correcto</p>
+                </div>
               ) : (
-                <div>
-                  <p style={{ color: "red" }}>❌ Incorrecto</p>
-                  <p>
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                  <p className="text-red-700 font-semibold mb-2">
+                    ❌ Incorrecto
+                  </p>
+                  <p className="text-gray-700 text-sm">
                     {typeof p.explicacion === "object"
                       ? JSON.stringify(p.explicacion)
                       : String(p.explicacion)}
@@ -489,14 +724,17 @@ function App() {
                 </div>
               )}
 
-              <button onClick={siguiente} style={{ marginTop: "10px" }}>
+              <button
+                onClick={siguiente}
+                className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2 rounded-xl transition w-full md:w-auto"
+              >
                 Siguiente
               </button>
             </div>
           )}
         </div>
       )}
-    </div>
+    </Layout>
   );
 }
 

@@ -128,8 +128,8 @@ Formato:
 
       let text = completion.choices[0].message.content;
 
-      console.log("🧠 RESPUESTA IA:");
-      console.log(text);
+      //console.log("🧠 RESPUESTA IA:");
+      //console.log(text);
 
       // 🔥 LIMPIAR RESPUESTA
       text = limpiarJSON(text);
