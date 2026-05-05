@@ -5,9 +5,9 @@ import OpenAI from "openai";
 import multer from "multer";
 import mammoth from "mammoth";
 import db from "./database.js";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 dotenv.config();
-
 console.log("🔥 server.js cargado");
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -28,6 +28,141 @@ const MAX_REINTENTOS = 3;
 
 // ------------------- FUNCIONES -------------------
 
+async function validarPreguntas(preguntas, contexto, esDocumento) {
+  try {
+    const prompt = esDocumento
+      ? `
+Valida las siguientes preguntas basadas en un documento:
+
+CONTEXTO:
+${contexto}
+
+PREGUNTAS:
+${JSON.stringify(preguntas)}
+
+Reglas:
+- Verifica que cada respuesta correcta esté explícitamente en el texto
+- Verifica que la pregunta se pueda responder SOLO con el texto
+- NO permitir información externa
+
+Responde en JSON:
+[
+  { "index": 0, "valida": true },
+  { "index": 1, "valida": false }
+]
+`
+      : `
+Valida las siguientes preguntas:
+
+${JSON.stringify(preguntas)}
+
+Reglas:
+- Verifica que la respuesta correcta sea correcta
+- Verifica que las opciones incorrectas no sean correctas
+- Detecta errores o inconsistencias
+
+Responde en JSON:
+[
+  { "index": 0, "valida": true },
+  { "index": 1, "valida": false }
+]
+`;
+
+    const completion = await client.chat.completions.create({
+      model: MODEL,
+      messages: [{ role: "user", content: prompt }],
+    });
+
+    let text = completion.choices[0].message.content;
+
+    text = text
+      .replace(/```json/g, "")
+      .replace(/```/g, "")
+      .trim();
+
+    const parsed = JSON.parse(text);
+    console.log("🧠 RESPUESTA IA (RAW):");
+    console.log(text);
+
+    if (!Array.isArray(parsed)) {
+      throw new Error("Validación inválida");
+    }
+
+    return parsed;
+  } catch (error) {
+    console.error("Error validando preguntas:", error.message);
+    return preguntas.map((_, i) => ({ index: i, valida: true }));
+  }
+}
+
+async function regenerarPregunta(contexto, esDocumento) {
+  const prompt = esDocumento
+    ? `
+Genera EXACTAMENTE UNA pregunta basada EXCLUSIVAMENTE en el siguiente texto:
+
+${contexto}
+
+REGLAS OBLIGATORIAS:
+- SOLO usar información del texto
+- NO inventar
+- NO inferir
+- NO usar conocimiento externo
+
+FORMATO JSON OBLIGATORIO (SIN EXCEPCIÓN):
+{
+  "pregunta": "texto",
+  "opciones": ["opcion1", "opcion2"] o ["opcion1", "opcion2", "opcion3", "opcion4"],
+  "respuesta_correcta": "una de las opciones",
+  "explicacion": "explicación breve"
+}
+
+REGLAS ADICIONALES:
+- SIEMPRE incluir TODOS los campos
+- NO devolver campos vacíos
+- NO devolver texto fuera del JSON
+- Si es verdadero/falso, usar exactamente ["Verdadero","Falso"]
+
+IMPORTANTE:
+Devuelve SOLO JSON válido.
+`
+    : `
+Genera EXACTAMENTE UNA pregunta educativa correcta sobre:
+
+${contexto}
+
+FORMATO JSON OBLIGATORIO:
+{
+  "pregunta": "texto",
+  "opciones": ["opcion1", "opcion2"] o ["opcion1", "opcion2", "opcion3", "opcion4"],
+  "respuesta_correcta": "una de las opciones",
+  "explicacion": "explicación breve"
+}
+
+REGLAS:
+- SIEMPRE incluir todos los campos
+- NO devolver texto fuera del JSON
+
+IMPORTANTE:
+Devuelve SOLO JSON válido.
+`;
+
+  const completion = await client.chat.completions.create({
+    model: MODEL,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  let text = completion.choices[0].message.content;
+
+  text = text
+    .replace(/```json/g, "")
+    .replace(/```/g, "")
+    .trim();
+
+  const parsed = JSON.parse(text);
+
+  return parsed[0] || parsed;
+}
+
 // 🔥 limpiar JSON
 function limpiarJSON(text) {
   return text
@@ -42,20 +177,82 @@ function limpiarJSON(text) {
 
 function normalizarPreguntas(preguntas) {
   return preguntas.map((p) => {
-    if (p.tipo === "multiple") {
-      if (["A", "B", "C", "D"].includes(p.correcta)) {
-        const index = ["A", "B", "C", "D"].indexOf(p.correcta);
-        p.correcta = p.opciones[index];
-      }
-
-      // limpiar opciones tipo "A) texto"
-      p.opciones = p.opciones.map((op) => op.replace(/^[A-D]\)\s*/, "").trim());
+    console.log("------ NORMALIZANDO PREGUNTA ------");
+    console.log("ANTES:", JSON.stringify(p));
+    if (!p.respuesta_correcta) {
+      p.respuesta_correcta = "No definida";
     }
 
+    if (!p.explicacion) {
+      p.explicacion = "Sin explicación disponible";
+    }
+    // 🔥 NORMALIZAR TIPO SIEMPRE (CLAVE)
+    if (p.tipo) {
+      const tipo = p.tipo.toLowerCase();
+
+      if (
+        tipo.includes("multiple") ||
+        tipo.includes("seleccion") ||
+        tipo.includes("selección")
+      ) {
+        p.tipo = "multiple";
+      } else if (tipo.includes("verdadero") || tipo.includes("falso")) {
+        p.tipo = "vf";
+      }
+    }
+
+    // 🔥 DETECTAR VERDADERO/FALSO (si no hay opciones)
+    if (!p.opciones || p.opciones.length === 0) {
+      p.opciones = ["Verdadero", "Falso"];
+    }
+
+    // 🔥 NORMALIZAR BOOLEANOS A TEXTO
+    if (typeof p.respuesta_correcta === "boolean") {
+      p.respuesta_correcta = p.respuesta_correcta ? "Verdadero" : "Falso";
+    }
+
+    // 🔥 NORMALIZAR OPCIONES (MULTIPLE)
+    if (p.opciones && Array.isArray(p.opciones)) {
+      // ✅ 1. limpiar primero (CLAVE)
+      p.opciones = p.opciones.map((op) => op.replace(/^[A-D]\)\s*/, "").trim());
+
+      // ✅ 2. luego mapear A/B/C/D
+      if (["A", "B", "C", "D"].includes(p.respuesta_correcta)) {
+        const index = ["A", "B", "C", "D"].indexOf(p.respuesta_correcta);
+        p.respuesta_correcta = p.opciones[index];
+      }
+    }
+
+    // 🔥 ASIGNAR TIPO
+    if (!p.tipo) {
+      if (p.opciones && Array.isArray(p.opciones)) {
+        const opcionesNormalizadas = p.opciones.map((o) =>
+          o.toLowerCase().trim(),
+        );
+
+        if (
+          opcionesNormalizadas.some((o) => o.includes("verdadero")) &&
+          opcionesNormalizadas.some((o) => o.includes("falso")) &&
+          p.opciones.length === 2
+        ) {
+          p.tipo = "vf";
+
+          // 🔥 ASEGURAR FORMATO EXACTO
+          p.opciones = ["Verdadero", "Falso"];
+        } else {
+          p.tipo = "multiple";
+        }
+      } else {
+        p.tipo = "vf";
+        p.opciones = ["Verdadero", "Falso"];
+      }
+    }
+
+    // 🔥 ASEGURAR EXPLICACIÓN STRING
     if (typeof p.explicacion !== "string") {
       p.explicacion = JSON.stringify(p.explicacion);
     }
-
+    console.log("DESPUÉS:", JSON.stringify(p));
     return p;
   });
 }
@@ -71,7 +268,7 @@ app.get("/", (req, res) => {
 app.post("/generar", async (req, res) => {
   console.log("🔥 endpoint /generar ejecutado");
 
-  const { temas } = req.body;
+  const { temas, esDocumento } = req.body;
 
   if (!temas || typeof temas !== "string") {
     return res.status(400).json({
@@ -116,6 +313,7 @@ FORMATO:
 - Incluir explicación breve en TODAS
 - NO repetir preguntas
 - NO repetir opciones
+- Debe agregar información nueva o un dato interesante. Debe sentirse como un dato educativo adicional
 - Nivel: primaria/secundaria
 
 IMPORTANTE:
@@ -131,17 +329,71 @@ Devuelve SOLO JSON válido, sin texto adicional.`,
 
       // 🔥 LIMPIAR RESPUESTA
       text = limpiarJSON(text);
+      console.log("🧹 RESPUESTA LIMPIA:");
+      console.log(text);
 
       // 🔥 PARSEAR JSON
       const parsed = JSON.parse(text);
+      console.log("📦 JSON PARSEADO:");
+      console.log(parsed);
 
-      if (!Array.isArray(parsed)) {
-        throw new Error("El resultado no es un array");
+      // 🔥 SOPORTAR AMBOS FORMATOS
+      let preguntasArray = null;
+
+      if (Array.isArray(parsed)) {
+        preguntasArray = parsed;
+      } else if (Array.isArray(parsed.preguntas)) {
+        preguntasArray = parsed.preguntas;
+      } else {
+        console.error("❌ Formato inesperado:", parsed);
+        throw new Error("El resultado no contiene preguntas válidas");
       }
 
-      preguntas = normalizarPreguntas(parsed);
+      console.log("🧾 ANTES DE NORMALIZAR:");
+      console.log(JSON.stringify(preguntasArray, null, 2));
 
-      console.log("✅ JSON válido obtenido");
+      // 🔥 NORMALIZAR
+      preguntas = normalizarPreguntas(preguntasArray);
+      console.log("🧩 PREGUNTAS NORMALIZADAS:");
+      console.log(JSON.stringify(preguntas, null, 2));
+
+      console.log("🔍 Validando preguntas...");
+
+      // 🔥 VALIDAR
+      const validacion = await validarPreguntas(preguntas, temas, esDocumento);
+      console.log("🔍 RESULTADO VALIDACIÓN:");
+      console.log(validacion);
+
+      // 🔁 REGENERAR LAS INCORRECTAS
+      for (const v of validacion) {
+        if (!v.valida) {
+          try {
+            console.log(`♻️ Regenerando pregunta ${v.index}`);
+
+            const nueva = await regenerarPregunta(temas, esDocumento);
+
+            // 🚨 VALIDACIÓN REAL
+            if (
+              !nueva ||
+              !nueva.pregunta ||
+              !nueva.respuesta_correcta ||
+              !nueva.explicacion
+            ) {
+              console.log("⚠️ Pregunta regenerada inválida, se omite");
+              continue;
+            }
+
+            preguntas[v.index] = normalizarPreguntas([nueva])[0];
+            console.log(`♻️ PREGUNTA REGENERADA EN INDEX ${v.index}:`);
+            console.log(JSON.stringify(preguntas[v.index], null, 2));
+          } catch (err) {
+            console.error("Error regenerando:", err.message);
+          }
+        }
+      }
+
+      console.log("✅ Preguntas validadas");
+
       break;
     } catch (error) {
       console.error(`❌ Error en intento ${intento}:`, error.message);
@@ -154,6 +406,12 @@ Devuelve SOLO JSON válido, sin texto adicional.`,
     }
   }
 
+  console.log("🚀 RESPUESTA FINAL AL FRONTEND:");
+  console.log(JSON.stringify(preguntas, null, 2));
+
+  preguntas = preguntas.filter(
+    (p) => p.pregunta && p.respuesta_correcta && p.explicacion,
+  );
   res.json({
     preguntas,
   });
@@ -312,6 +570,10 @@ app.post("/procesar-archivos", upload.array("archivos"), async (req, res) => {
     for (const file of archivos) {
       const nombre = file.originalname.toLowerCase();
 
+      console.log("TIPO buffer:", file.buffer?.constructor?.name);
+      console.log("ES Buffer:", Buffer.isBuffer(file.buffer));
+      console.log("TAMAÑO buffer:", file.buffer?.length);
+
       // TXT
       if (nombre.endsWith(".txt")) {
         textoTotal += file.buffer.toString("utf-8") + "\n\n";
@@ -319,7 +581,34 @@ app.post("/procesar-archivos", upload.array("archivos"), async (req, res) => {
 
       // PDF
       else if (nombre.endsWith(".pdf")) {
-        textoTotal += "[Archivo PDF no soportado en esta versión]\n\n";
+        try {
+          console.log("👉 Procesando PDF:", nombre);
+          const loadingTask = pdfjsLib.getDocument({
+            data: new Uint8Array(file.buffer),
+          });
+          const pdf = await loadingTask.promise;
+
+          let text = "";
+
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+
+            const pageText = content.items.map((item) => item.str).join(" ");
+            text += pageText + " ";
+          }
+
+          const limpio = text.replace(/\s+/g, " ").trim();
+
+          if (!limpio || limpio.length < 20) {
+            textoTotal += "[PDF sin texto legible]\n\n";
+          } else {
+            textoTotal += limpio + "\n\n";
+          }
+        } catch (err) {
+          console.error("Error leyendo PDF:", err.message);
+          textoTotal += "[Error leyendo PDF]\n\n";
+        }
       }
 
       // DOCX
@@ -339,7 +628,6 @@ app.post("/procesar-archivos", upload.array("archivos"), async (req, res) => {
     // 🔥 RESUMEN IA
     const prompt = `
 Resume el siguiente contenido en UNA sola frase corta (máximo 20 palabras).
-La frase debe comenzar SIEMPRE con: "Los documentos cargados tratan sobre..."
 No des detalles, solo una idea general del tema.
 
 ${textoTotal.substring(0, 4000)}

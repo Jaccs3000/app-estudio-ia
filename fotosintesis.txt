@@ -1,0 +1,11 @@
+La fotosíntesis es un proceso biológico fundamental mediante el cual las plantas, las algas y algunas bacterias convierten la energía luminosa del sol en energía química almacenada en forma de glucosa. Este proceso ocurre principalmente en las hojas de las plantas, específicamente en unos orgánulos celulares llamados cloroplastos, que contienen un pigmento verde llamado clorofila. La clorofila es responsable de capturar la luz solar, lo que da inicio a una serie de reacciones químicas complejas.
+
+La fotosíntesis se divide en dos fases principales: la fase luminosa y la fase oscura (también conocida como ciclo de Calvin). En la fase luminosa, que ocurre en las membranas de los tilacoides dentro de los cloroplastos, la energía solar es absorbida por la clorofila. Esta energía se utiliza para dividir moléculas de agua (H₂O) en oxígeno (O₂), protones y electrones. Como resultado, se libera oxígeno al ambiente como subproducto, lo cual es esencial para la respiración de la mayoría de los seres vivos.
+
+En esta misma fase, se producen moléculas energéticas como el ATP (adenosín trifosfato) y el NADPH, que serán utilizadas en la siguiente etapa. La fase oscura no requiere luz directa, pero depende de los productos generados en la fase luminosa. Esta fase ocurre en el estroma del cloroplasto y utiliza el dióxido de carbono (CO₂) del aire junto con el ATP y el NADPH para sintetizar glucosa mediante una serie de reacciones enzimáticas.
+
+La ecuación general de la fotosíntesis puede resumirse como: dióxido de carbono más agua, en presencia de luz solar, producen glucosa y oxígeno. Este proceso no solo es vital para las plantas, sino que también sostiene la vida en la Tierra, ya que proporciona el oxígeno necesario para la respiración y constituye la base de la cadena alimentaria.
+
+Además, la fotosíntesis juega un papel crucial en la regulación del clima, ya que ayuda a reducir los niveles de dióxido de carbono en la atmósfera, un gas de efecto invernadero. Sin este proceso, la vida tal como la conocemos no sería posible, ya que no habría suficiente oxígeno ni alimentos para sustentar a los organismos heterótrofos.
+
+En resumen, la fotosíntesis es uno de los procesos más importantes del planeta, ya que transforma la energía solar en energía química, produce oxígeno y permite el desarrollo de la vida en la Tierra.

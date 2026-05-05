@@ -1,5 +1,5 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Cell } from "recharts";
 import { ResponsiveContainer } from "recharts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -24,6 +24,8 @@ function App() {
   const [hayMas, setHayMas] = useState(false);
   const [dataGrafico, setDataGrafico] = useState([]);
   const [verDashboard, setVerDashboard] = useState(false);
+  const [resumenDocumento, setResumenDocumento] = useState("");
+  const [textoDocumento, setTextoDocumento] = useState("");
   const LIMITE_GRAFICO = 10;
 
   const [preguntas, setPreguntas] = useState([]);
@@ -38,6 +40,8 @@ function App() {
   const [seleccionActual, setSeleccionActual] = useState(null);
   const [finalizado, setFinalizado] = useState(false);
   const [modoRefuerzo, setModoRefuerzo] = useState(false);
+  const [archivos, setArchivos] = useState([]);
+  const inputFileRef = useRef(null);
 
   const btnPrimary =
     "bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2 rounded-xl transition";
@@ -57,8 +61,15 @@ function App() {
   // ------------------- GENERAR -------------------
 
   const generarPreguntas = async () => {
-    if (!temas) {
-      alert("Escribe al menos un tema");
+    const contenido = textoDocumento || temas;
+
+    if (textoDocumento.includes("sin texto")) {
+      alert("El PDF no contiene texto legible");
+      return;
+    }
+
+    if (!contenido.trim()) {
+      alert("Debes escribir al menos un tema o cargar un documento");
       return;
     }
 
@@ -70,15 +81,21 @@ function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ temas }),
+        body: JSON.stringify({ temas: contenido }),
       });
 
       const data = await response.json();
 
       const lista = data.preguntas || [];
 
+      console.log("📥 PREGUNTAS RECIBIDAS EN FRONT:");
+      console.log(lista);
+
       setPreguntas(lista);
       setPreguntasOriginales(lista);
+
+      console.log("📦 STATE preguntas:");
+      console.log(lista);
 
       setIndiceActual(0);
       setRespuestas([]);
@@ -94,20 +111,82 @@ function App() {
     setCargando(false);
   };
 
+  const manejarCargaArchivos = (e) => {
+    const procesarArchivos = async (files) => {
+      try {
+        const formData = new FormData();
+
+        files.forEach((file) => {
+          formData.append("archivos", file);
+        });
+
+        const res = await fetch("http://localhost:3000/procesar-archivos", {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = await res.json();
+
+        setTextoDocumento(data.texto); // 👈 NUEVO (IMPORTANTE)
+        setResumenDocumento(data.resumen);
+      } catch (error) {
+        console.error(error);
+        alert("Error procesando archivos");
+      }
+    };
+    const files = Array.from(e.target.files);
+
+    // 🔥 VALIDACIÓN: si hay texto escrito
+    if (temas.trim().length > 0) {
+      const confirmar = window.confirm(
+        "Tienes texto escrito. ¿Deseas borrarlo y continuar?",
+      );
+
+      if (!confirmar) return;
+
+      setTemas("");
+    }
+
+    const nuevosArchivos = [...archivos, ...files];
+    setArchivos(nuevosArchivos);
+
+    // 🔥 enviar al backend
+    procesarArchivos(nuevosArchivos);
+    e.target.value = null;
+  };
+
+  const eliminarArchivo = (index) => {
+    const nuevos = archivos.filter((_, i) => i !== index);
+    setArchivos(nuevos);
+
+    if (nuevos.length === 0) {
+      setResumenDocumento(""); // 👈 limpiar resumen
+      setTextoDocumento(""); // 👈 limpiar texto oculto
+    }
+  };
+
+  const abrirSelectorArchivos = () => {
+    if (temas.trim().length > 0) {
+      const confirmar = window.confirm(
+        "Tienes texto escrito. ¿Deseas borrarlo y continuar?",
+      );
+
+      if (!confirmar) return;
+
+      setTemas("");
+    }
+
+    if (inputFileRef.current) {
+      inputFileRef.current.click();
+    }
+  };
+
   // ------------------- RESPONDER -------------------
 
   const responder = (valor) => {
     const pregunta = preguntas[indiceActual];
 
-    let esCorrecta = false;
-
-    if (pregunta.tipo === "multiple") {
-      esCorrecta = valor === pregunta.correcta;
-    }
-
-    if (pregunta.tipo === "vf") {
-      esCorrecta = valor === pregunta.respuesta_correcta;
-    }
+    const esCorrecta = valor === pregunta.respuesta_correcta;
 
     const nueva = {
       pregunta: pregunta.pregunta,
@@ -211,7 +290,7 @@ function App() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          temas,
+          temas: resumenDocumento || temas,
           preguntas,
           respuestas,
           correctas,
@@ -589,6 +668,10 @@ function App() {
     total = preguntas.length;
     actual = indiceActual + 1;
     p = preguntas[indiceActual] || null;
+    console.log("🖼️ PREGUNTA ACTUAL:");
+    console.log(p);
+    console.log("🔎 TIPO DE PREGUNTA:");
+    console.log(p?.tipo);
   }
 
   return (
@@ -598,17 +681,69 @@ function App() {
         <>
           <div className="space-y-4">
             <textarea
-              placeholder="Escribe los temas (ej: fotosíntesis, células)"
+              disabled={archivos.length > 0}
+              placeholder={
+                archivos.length > 0
+                  ? "Elimina los archivos para escribir"
+                  : "Escribe los temas (ej: fotosíntesis, células)"
+              }
               value={temas}
               onChange={(e) => setTemas(e.target.value)}
               className="w-full h-28 p-4 border border-gray-300 rounded-xl focus:ring-2 focus:ring-indigo-500 transition"
             />
+            <input
+              ref={inputFileRef}
+              type="file"
+              multiple
+              accept=".txt,.pdf,.doc,.docx"
+              onChange={manejarCargaArchivos}
+              style={{ display: "none" }}
+            />
+            {/* BLOQUE ARCHIVOS */}
+            <div className="space-y-3">
+              <button
+                onClick={abrirSelectorArchivos}
+                className="bg-white border-2 border-dashed border-indigo-400 text-indigo-600 px-4 py-4 rounded-xl w-full hover:bg-indigo-50 transition cursor-pointer"
+              >
+                {archivos.length > 0
+                  ? "Agregar más documentos 📄"
+                  : "Subir documentos 📄"}
+              </button>
+              {archivos.length === 0 && (
+                <p className="text-xs text-gray-400 text-center">
+                  Puedes subir varios archivos (PDF, Word, TXT)
+                </p>
+              )}
 
-            <div className="flex flex-col md:flex-row gap-2">
+              {archivos.length > 0 && (
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {archivos.map((file, index) => (
+                    <div
+                      key={index}
+                      className="flex justify-between items-center bg-white border border-gray-200 px-3 py-2 rounded-lg shadow-sm"
+                    >
+                      <span className="text-sm text-gray-700 truncate max-w-[85%]">
+                        {file.name}
+                      </span>
+
+                      <button
+                        onClick={() => eliminarArchivo(index)}
+                        className="text-gray-400 hover:text-red-500 transition ml-3"
+                      >
+                        ❌
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* BLOQUE BOTONES (SEPARADO) */}
+            <div className="flex flex-col md:flex-row gap-2 mt-4">
               <button
                 onClick={generarPreguntas}
                 disabled={cargando}
-                className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4 py-2 rounded-xl w-full"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl w-full"
               >
                 {cargando ? "Generando..." : "Generar preguntas"}
               </button>
@@ -630,6 +765,22 @@ function App() {
           </div>
         </>
       )}
+
+      {resumenDocumento &&
+        preguntas.length === 0 &&
+        !finalizado &&
+        !verHistorial &&
+        !verDashboard &&
+        !detalle && (
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mt-4">
+            <p className="text-sm text-indigo-800 font-medium mb-1">
+              📄 Resumen del documento
+            </p>
+            <p className="text-sm text-gray-700 whitespace-pre-line">
+              {resumenDocumento}
+            </p>
+          </div>
+        )}
 
       {/* MODO REFUERZO */}
       {modoRefuerzo && (
@@ -657,6 +808,9 @@ function App() {
           <h2 className="text-lg md:text-xl font-semibold text-gray-800 mb-4">
             {p.pregunta}
           </h2>
+          <p style={{ color: "red", fontSize: "12px" }}>
+            DEBUG → tipo: {p.tipo}
+          </p>
 
           {/* OPCIONES */}
           {!mostrarFeedback && (
@@ -680,12 +834,11 @@ function App() {
                   ))}
                 </div>
               )}
-
               {p.tipo === "vf" && (
                 <div className="flex gap-3 mt-2">
                   <button
                     onClick={() => {
-                      if (!mostrarFeedback) responder(true);
+                      if (!mostrarFeedback) responder("Verdadero");
                     }}
                     className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl transition w-full md:w-auto"
                   >
@@ -693,7 +846,7 @@ function App() {
                   </button>
                   <button
                     onClick={() => {
-                      if (!mostrarFeedback) responder(false);
+                      if (!mostrarFeedback) responder("Falso");
                     }}
                     className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-xl transition w-full md:w-auto"
                   >
